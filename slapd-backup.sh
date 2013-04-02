@@ -13,8 +13,6 @@
 #   3) Backup aborted or interrupted.
 
 # To do (known limitations):
-#   * Current script does not support multiple databases. As a work-around, you
-#     can add your DIT to slapcat and run the script for each database.
 #   * A restore script that receives the backup archive file as an input and
 #     does the right job would be handy. Coming soon...
 
@@ -88,25 +86,31 @@ generate_backup_dump() {
   # Dump slapd configuration database
   # From OpenLDAP 2.3 onwards, slapd configuration is stored in OpenLDAP and
   # not in a plain text file any more.
-  CONFIG_DUMP_FILE="${BACKUP_DIR}/${BACKUP_PREFIX}_config.ldiff"
+  CONFIG_DUMP_FILE="${BACKUP_DIR}/${BACKUP_PREFIX}_config.ldif"
   if slapcat -b "cn=config" -l ${CONFIG_DUMP_FILE} 2>>${LOG_FILE}; then
     printl "LDAP configuration database successfully dumped to ${CONFIG_DUMP_FILE}."
     BACKUP_FILES="${BACKUP_FILES} ${CONFIG_DUMP_FILE}"
   else
-    printl "Could not dump ldap configuration database to ldiff file using slapcat."
+    printl "Could not dump ldap configuration database to ldif file using slapcat."
     let ERROR_COUNT++
   fi
-  # Dump the user DIT
-  DB_DUMP_FILE="${BACKUP_DIR}/${BACKUP_PREFIX}.ldiff"
-  # Example provided if you want to backup a specific DIT
-  # if slapcat -b "dc=example,dc=com" -l ${DB_DUMP_FILE}; then
-  if slapcat -l ${DB_DUMP_FILE} 2>>${LOG_FILE}; then
-    printl "LDAP database successfully dumped to ${DB_DUMP_FILE}."
-    BACKUP_FILES="${BACKUP_FILES} ${DB_DUMP_FILE}"
-  else
-    printl "Could not dump ldap directory to ldiff file using slapcat."
-    let ERROR_COUNT++
-  fi
+
+  # Dump each one of the databases identified
+  NUM_DBS=$(grep "dn: olcDatabase=" ${CONFIG_DUMP_FILE} | wc -l)
+  let NUM_DBS-=2
+  DB=1
+  while [[ ${DB} -le ${NUM_DBS} ]]; do
+    # Dump the user DIT
+    DB_DUMP_FILE="${BACKUP_DIR}/${BACKUP_PREFIX}_dit${DB}.ldif"
+    if slapcat -n ${DB} -l ${DB_DUMP_FILE} 2>>${LOG_FILE}; then
+      printl "LDAP database ${DB} successfully dumped to ${DB_DUMP_FILE}."
+      BACKUP_FILES="${BACKUP_FILES} ${DB_DUMP_FILE}"
+    else
+      printl "Could not dump ldap directory to ldif file using slapcat."
+      let ERROR_COUNT++
+    fi
+    let DB++
+  done
 }
 
 post_backup_routine() {
@@ -206,6 +210,7 @@ printl "${SERVICE} backup completed at `date +"%m/%d/%Y - %H:%M:%S"`"
 
 # Append the log file to the archive and compress the tarball
 tar --append --file=${ARCHIVE_FILE} ${LOG_FILE} 
-gzip ${ARCHIVE_FILE}
+gzip -f ${ARCHIVE_FILE}
 
 exit ${RETURN_CODE}
+
